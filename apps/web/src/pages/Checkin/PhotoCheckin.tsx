@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Box, Typography, Button, Chip, LinearProgress, Card, CardContent, TextField,
+  Box, Typography, Button, Chip, LinearProgress, Card, CardContent,
 } from '@mui/material';
 import { PlayArrow, Search, UploadFile } from '@mui/icons-material';
 import { useI18n } from '../../i18n';
