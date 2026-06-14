@@ -122,6 +122,7 @@ const en: Record<string, string> = {
   'common.success': 'Success',
   'common.noData': 'No data',
   'common.back': 'Back',
+  'common.ready': 'ready',
 };
 
 export default en;

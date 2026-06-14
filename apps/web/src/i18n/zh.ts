@@ -122,6 +122,7 @@ const zh: Record<string, string> = {
   'common.success': '成功',
   'common.noData': '暂无数据',
   'common.back': '返回',
+  'common.ready': '就绪',
 };
 
 export default zh;

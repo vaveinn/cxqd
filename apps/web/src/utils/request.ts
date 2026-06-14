@@ -20,12 +20,17 @@ export const fetch: FetchType = (url, params = {}) => {
 
   return new Promise((resolve) => {
     globalThis.fetch(url, { ...params }).then(res => {
-      switch (res.headers.get('Content-Type')) {
-        case 'text/plain; charset=utf-8': return res.text();
-        case 'application/json; charset=utf-8': return res.json();
-      }
+      const ct = res.headers.get('Content-Type') || '';
+      if (ct.includes('application/json')) return res.json();
+      if (ct.includes('text/plain') || ct.includes('text/html')) return res.text();
+      // Fallback: try text, then json
+      return res.text().then((t: string) => {
+        try { return JSON.parse(t); } catch { return t; }
+      });
     }).then(val => {
       resolve(val);
+    }).catch(() => {
+      resolve(null);
     });
   });
 };
