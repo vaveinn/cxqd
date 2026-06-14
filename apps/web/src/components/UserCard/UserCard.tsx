@@ -12,11 +12,9 @@ import MenuItem from '@mui/material/MenuItem';
 import Divider from '@mui/material/Divider';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
-import { useNavigate } from 'react-router-dom';
 import { useLongPress } from '../../hooks/useLongPress';
-import { DialogChoice } from '../../pages/Start/Start';
 import { monitor_stop_api, monitor_start_api } from '../../config/api';
-import styles from './UserCard.module.css';
+import { useI18n } from '../../i18n';
 
 interface UserCardProps {
   indb: IDBDatabase;
@@ -24,12 +22,13 @@ interface UserCardProps {
   setAlert: (msg: any) => void;
   setCurrent: (target: UserParamsType) => void;
   setUser: (value: React.SetStateAction<any>) => void;
-  emitDialog: (choice: DialogChoice, open: boolean) => void;
+  onConfigOpen: (user: UserParamsType) => void;
+  onCardClick?: (user: UserParamsType) => void;
 }
 
 function UserCard(props: UserCardProps) {
+  const { t } = useI18n();
   const phoneStr = `${props.user.phone.substring(0, 3)} **** **${props.user.phone.substring(9)}`;
-  const navigate = useNavigate();
   const [once, setOnce] = useState(true);
   const [ref] = useLongPress((pos) => {
     handleSafariContextMenu(pos);
@@ -40,85 +39,57 @@ function UserCard(props: UserCardProps) {
     mouseY: number;
   } | null>(null);
 
-  // 移除用户
   const removeUser = () => {
     const request = props.indb.transaction('user', 'readwrite').objectStore('user').delete(props.user.phone);
     request.onsuccess = () => {
-      console.log('用户已被移除');
       contextMenuClose();
       window.location.reload();
     };
   };
 
-  // 弹出监听配置窗口
   const configureMonitor = () => {
     contextMenuClose();
     props.setCurrent(props.user);
-    props.emitDialog(DialogChoice.CONFIG, true);
+    props.onConfigOpen(props.user);
   };
 
-  // 菜单处理
   const handleContextMenu = (event: React.MouseEvent) => {
     event.preventDefault();
     setContextMenu(
       contextMenu === null
-        ? {
-          mouseX: event.clientX - 2,
-          mouseY: event.clientY - 4,
-        }
+        ? { mouseX: event.clientX - 2, mouseY: event.clientY - 4 }
         : null,
     );
   };
 
-  // Safari 浏览器，长按弹出菜单需要模拟
-  const handleSafariContextMenu = (position: { x: number, y: number; }) => {
+  const handleSafariContextMenu = (position: { x: number; y: number }) => {
     setContextMenu(
       contextMenu === null
-        ? {
-          mouseX: position.x - 2,
-          mouseY: position.y - 4,
-        }
+        ? { mouseX: position.x - 2, mouseY: position.y - 4 }
         : null,
     );
   };
 
-  const contextMenuClose = () => {
-    setContextMenu(null);
-  };
+  const contextMenuClose = () => setContextMenu(null);
 
-  // 设置用户监听状态
   const setMonitorState = (target: UserParamsType, value: boolean) => {
-    // 更新列表用户的监听状态
     props.setUser((prev: any) => {
       return prev.map((user: UserParamsType) => {
-        if (user === target) {
-          return { ...user, monitor: value };
-        }
+        if (user === target) return { ...user, monitor: value };
         return user;
       });
     });
-    // 同时要将状态写入数据库
     const request = props.indb!.transaction(['user'], 'readwrite')
       .objectStore('user')
       .put({
-        phone: target.phone,
-        fid: target.fid,
-        vc3: target.vc3,
-        password: target.password,
-        _uid: target._uid,
-        _d: target._d,
-        uf: target.uf,
-        name: target.name,
-        date: new Date(),
-        monitor: value,
-        lv: target.lv,
-        config: { ...target.config }
+        phone: target.phone, fid: target.fid, vc3: target.vc3, password: target.password,
+        _uid: target._uid, _d: target._d, uf: target.uf, name: target.name,
+        date: new Date(), monitor: value, lv: target.lv, config: { ...target.config }
       });
     request.onerror = () => { console.log('写入失败'); };
     request.onsuccess = () => { console.log('写入成功'); };
   };
 
-  // 开<=>关
   const toggleMonitor = async () => {
     setLoading(true);
     let reqData: any, reqAPI: string;
@@ -128,31 +99,20 @@ function UserCard(props: UserCardProps) {
       reqAPI = monitor_start_api;
       const payload = JSON.stringify({
         credentials: {
-          phone: props.user.phone,
-          uf: props.user.uf,
-          _d: props.user._d,
-          vc3: props.user.vc3,
-          uid: props.user._uid,
-          lv: props.user.lv,
-          fid: props.user.fid
+          phone: props.user.phone, uf: props.user.uf, _d: props.user._d,
+          vc3: props.user.vc3, uid: props.user._uid, lv: props.user.lv, fid: props.user.fid
         },
         config: { ...props.user.config }
       });
       reqData = enc.Utf8.parse(payload).toString(enc.Base64);
     }
-
     const result = await Fetch(`${reqAPI}/${props.user.phone}`, { method: 'POST', body: reqData });
     switch (result.code) {
-      case 200: {
-        setMonitorState(props.user, true); break;
-      }
-      case 201: {
-        setMonitorState(props.user, false); break;
-      }
-      case 202: {
+      case 200: setMonitorState(props.user, true); break;
+      case 201: setMonitorState(props.user, false); break;
+      case 202:
         setMonitorState(props.user, false);
         props.setAlert({ open: true, message: '身份过期' });
-      }
     }
     setLoading(false);
   };
@@ -160,11 +120,7 @@ function UserCard(props: UserCardProps) {
   const debounced = (fn: () => void, delay: number) => {
     let timeout: any = null;
     return function () {
-      if (once) {
-        fn();
-        setOnce(false);
-        return;
-      }
+      if (once) { fn(); setOnce(false); return; }
       if (timeout) clearTimeout(timeout);
       timeout = setTimeout(fn, delay);
     };
@@ -183,29 +139,47 @@ function UserCard(props: UserCardProps) {
         display: 'inline-block',
         maxWidth: 345,
         minWidth: 300,
-        backgroundColor: '#ecf0f3',
-        marginBottom: 3.5,
-        marginRight: 3.5,
-        verticalAlign: 'bottom'
+        mb: 2,
+        mr: 2,
+        verticalAlign: 'bottom',
+        cursor: 'pointer',
       }}
       ref={ref}
       onContextMenu={handleContextMenu}
-      className={styles.neumCard}
+      className="glass-card"
     >
-      <CardActionArea onClick={() => { navigate('/dash/' + props.user.phone); }}>
+      <CardActionArea onClick={() => props.onCardClick?.(props.user)}>
         <CardContent sx={{ position: 'relative' }}>
-          <Typography variant="h5" align='left' component="div">
-            <span className={styles.name}>{props.user.name}</span>
+          <Typography variant="h5" align="left" component="div">
+            <span style={{ fontWeight: 600, color: 'text.primary' }}>{props.user.name}</span>
             <p>{phoneStr}</p>
           </Typography>
-          <Typography sx={{ color: 'rgb(73, 85, 105)' }} variant="body2" align='right'>
-            凭证日期：{new Date(props.user.date).toLocaleString()}
+          <Typography sx={{ color: 'text.secondary' }} variant="body2" align="right">
+            {new Date(props.user.date).toLocaleString()}
           </Typography>
-          <span className={styles.monitorBtn + ' ' + (props.user.monitor === true ? styles.active : styles.inactive)}
+          <Typography
             onClick={handleMonitorChange}
+            sx={{
+              position: 'absolute',
+              top: 17,
+              right: 32,
+              px: 1,
+              py: 0.3,
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              border: '2px dashed',
+              borderRadius: 1,
+              cursor: 'pointer',
+              borderColor: props.user.monitor ? 'success.main' : 'text.secondary',
+              color: props.user.monitor ? 'success.main' : 'text.secondary',
+              transition: 'all 200ms ease',
+              '&:hover': {
+                bgcolor: 'action.hover',
+              },
+            }}
           >
-            {loading ? '加载中' : props.user.monitor === true ? '监听' : '未监听'}
-          </span>
+            {loading ? '...' : props.user.monitor ? 'ON' : 'OFF'}
+          </Typography>
         </CardContent>
       </CardActionArea>
       <Menu
@@ -217,20 +191,16 @@ function UserCard(props: UserCardProps) {
         }
       >
         <MenuItem onClick={removeUser}>
-          <ListItemIcon>
-            <Delete />
-          </ListItemIcon>
-          <ListItemText>移除</ListItemText>
+          <ListItemIcon><Delete /></ListItemIcon>
+          <ListItemText>{t('account.deleteUser')}</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem onClick={configureMonitor}>
-          <ListItemIcon>
-            <SettingsIcon />
-          </ListItemIcon>
-          <ListItemText>监听配置</ListItemText>
+          <ListItemIcon><SettingsIcon /></ListItemIcon>
+          <ListItemText>{t('account.editConfig')}</ListItemText>
         </MenuItem>
       </Menu>
-    </Card >
+    </Card>
   );
 }
 

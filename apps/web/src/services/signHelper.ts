@@ -1,6 +1,6 @@
 import { Decoder } from '@nuintun/qrcode';
-import { general_api, location_api, ocr_api, photo_api, qrcode_api, upload_api, uvtoken_api } from '../../config/api';
-import { fetch as Fetch } from '../../utils/request';
+import { general_api, location_api, ocr_api, photo_api, qrcode_api, upload_api, uvtoken_api } from '../config/api';
+import { fetch as Fetch } from '../utils/request';
 
 export const generalSign = async (userParams: UserParamsType, activeId: number | undefined) => {
   const result = await Fetch(general_api, {
@@ -92,15 +92,15 @@ export const getuvToken = async (userParams: UserParamsType) => {
     body: {
       uf: userParams.uf,
       _d: userParams._d,
-      vc3: userParams.vc3,
       uid: userParams._uid,
+      vc3: userParams.vc3,
     },
     type: 'json'
   });
   return token._token;
 };
 
-// [默认] 使用浏览器解析ENC，成功率较低
+// Browser-based QR decode using @nuintun/qrcode
 export const parseEnc = (file: File): Promise<string> => {
   return new Promise((resolve) => {
     const url = window.URL || window.webkitURL;
@@ -121,20 +121,19 @@ export const parseEnc = (file: File): Promise<string> => {
   });
 };
 
-// [推荐] 使用腾讯云OCR解析ENC，请在cli项目中配置secretId和secretKey
-// export const parseEnc = async (inputFile: File) => {
-//   const data = new FormData();
-//   data.append('file', inputFile);
-//   const res = await Fetch(ocr_api, {
-//     method: 'POST',
-//     body: data,
-//     type: 'text'
-//   });
-//   return res;
-// };
+// Decode enc from QR data URL string (for camera-based scanning)
+export const parseEncFromUrl = (qrData: string): string => {
+  try {
+    const enc_start = qrData.indexOf('enc=') + 4;
+    const enc_end = qrData.indexOf('&', enc_start);
+    if (enc_end === -1) return qrData.substring(enc_start);
+    return qrData.substring(enc_start, enc_end);
+  } catch {
+    return '';
+  }
+};
 
 export const uploadFile = async (userParams: UserParamsType, inputFile: File, token: string) => {
-  // 填入FormData
   const data = new FormData();
   data.append('uf', userParams.uf);
   data.append('_d', userParams._d);
@@ -142,7 +141,6 @@ export const uploadFile = async (userParams: UserParamsType, inputFile: File, to
   data.append('vc3', userParams.vc3);
   data.append('file', inputFile);
 
-  // 使用Token传文件，返回objectId
   const res = await Fetch(upload_api + `?_token=${token}`, {
     method: 'POST',
     body: data
@@ -151,13 +149,7 @@ export const uploadFile = async (userParams: UserParamsType, inputFile: File, to
 };
 
 export const showResultWithTransition = (cb_setStatus: (res: string) => void, value: string) => {
-  (document.getElementById('sign-btn') as HTMLButtonElement).disabled = true;
-  const neum_form = document.getElementsByClassName('neum-form')[0];
-  const content = document.getElementById('neum-form-content');
-  content!.style.opacity = '0';
-  setTimeout(() => {
-    content!.style.display = 'none';
-    neum_form.classList.add('form-height');
-    cb_setStatus(value);
-  }, 600);
+  const signBtn = document.getElementById('sign-btn') as HTMLButtonElement;
+  if (signBtn) signBtn.disabled = true;
+  cb_setStatus(value);
 };

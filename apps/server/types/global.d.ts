@@ -15,6 +15,12 @@ interface MailConfig {
   to: string;
 }
 
+interface WeworkConfig {
+  enabled: boolean;
+  webhook_url: string;
+}
+
+/** @deprecated 旧版QQ机器人配置，保留兼容 */
 interface cqServerConfig {
   cq_enabled: boolean;
   target_type: string;
@@ -39,6 +45,8 @@ interface User {
   params?: UserParams;
   monitor?: MonitorConfig;
   mailing?: MailConfig;
+  wework?: WeworkConfig;
+  /** @deprecated */
   cqserver?: cqServerConfig;
 }
 

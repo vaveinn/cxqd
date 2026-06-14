@@ -91,30 +91,15 @@ export const monitorPromptsQuestions: Array<prompts.PromptObject> = [
   },
   {
     type: 'confirm',
-    name: 'cq_enabled',
-    message: '是否连接到go-cqhttp服务?',
+    name: 'wework_enabled',
+    message: '是否启用企业微信机器人通知?',
     initial: false,
   },
   {
     type: (prev) => (prev ? 'text' : null),
-    name: 'ws_url',
-    message: 'Websocket 地址',
-    initial: 'ws://127.0.0.1:8080',
-  },
-  {
-    type: (prev) => (prev ? 'select' : null),
-    name: 'target_type',
-    message: '选择消息的推送目标',
-    choices: [
-      { title: '群组', value: 'group' },
-      { title: '私聊', value: 'private' }
-    ],
-  },
-  {
-    type: (prev) => (prev ? 'number' : null),
-    name: 'target_id',
-    message: '接收号码',
-    initial: 10001,
+    name: 'webhook_url',
+    message: '企业微信机器人 Webhook 地址',
+    initial: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=',
   },
 ];
 

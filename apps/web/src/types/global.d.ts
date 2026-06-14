@@ -20,6 +20,8 @@ interface UserParamsType {
 interface UserConfig {
   monitor: MonitorConfig;
   mailing: MailingConfig;
+  wework: WeworkBotConfig;
+  /** @deprecated */
   cqserver: CQServerConfig;
 }
 
@@ -46,9 +48,27 @@ interface MailingConfig {
   to: string;
 }
 
+interface WeworkBotConfig {
+  enabled: boolean;
+  webhook_url: string;
+}
+
+/** @deprecated 旧版QQ机器人配置 */
 interface CQServerConfig {
   cq_enabled: boolean;
   ws_url: string;
   target_type: string;
   target_id: number;
+}
+
+interface SignRecord {
+  id?: number;
+  phone: string;
+  userName: string;
+  type: string;
+  otherId: number;
+  activityName: string;
+  status: 'success' | 'fail';
+  message: string;
+  timestamp: number;
 }

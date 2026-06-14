@@ -5,12 +5,10 @@ import path from 'path';
 import prompts from 'prompts';
 import WebSocket from 'ws';
 import { getPPTActiveInfo, getSignType, preSign, preSign2, speculateType } from './functions/activity';
-import CQ from './functions/cq';
+import WeworkBot from './functions/wework';
 import { GeneralSign, GeneralSign_2 } from './functions/general';
 import { LocationSign, LocationSign_2 } from './functions/location';
 import { getObjectIdFromcxPan, PhotoSign, PhotoSign_2 } from './functions/photo';
-import { QRCodeSign } from './functions/qrcode';
-import { QrCodeScan } from './functions/tencent.qrcode';
 import { getIMParams, getLocalUsers, userLogin } from './functions/user';
 import { getJsonObject, getStoredUser, storeUser } from './utils/file';
 import { delay } from './utils/helper';
@@ -37,8 +35,8 @@ const WebIMConfig = {
   isWindowSDK: false,
   isSandBox: false,
   isDebug: false,
-  autoReconnectNumMax: 2,
-  autoReconnectInterval: 2,
+  autoReconnectNumMax: 9999,   // 24/7 无限重连
+  autoReconnectInterval: 5,     // 断开后 5 秒重连
   isWebRTC: false,
   heartBeatWait: 4500,
   delivery: false,
@@ -80,7 +78,7 @@ async function configure(phone: string) {
     const response = await prompts(monitorPromptsQuestions, PromptsOptions);
     const monitor: any = {};
     const mailing: any = {};
-    const cqserver: any = {};
+    const wework: any = {};
     monitor.delay = response.delay;
     monitor.lon = response.lon;
     monitor.lat = response.lat;
@@ -92,20 +90,18 @@ async function configure(phone: string) {
     mailing.user = response.user;
     mailing.pass = response.pass;
     mailing.to = response.to;
-    cqserver.cq_enabled = response.cq_enabled;
-    cqserver.ws_url = response.ws_url;
-    cqserver.target_type = response.target_type;
-    cqserver.target_id = response.target_id;
+    wework.enabled = response.wework_enabled !== undefined ? response.wework_enabled : response.cq_enabled;
+    wework.webhook_url = response.webhook_url || response.ws_url || '';
     config!.monitor = monitor;
     config!.mailing = mailing;
-    config!.cqserver = cqserver;
+    config!.wework = wework;
 
     const data = getJsonObject('configs/storage.json');
     for (let i = 0; i < data.users.length; i++) {
       if (data.users[i].phone === phone) {
         data.users[i].monitor = monitor;
         data.users[i].mailing = mailing;
-        data.users[i].cqserver = cqserver;
+        data.users[i].wework = wework;
         break;
       }
     }
@@ -114,7 +110,7 @@ async function configure(phone: string) {
     fs.writeFile(path.join(__dirname, './configs/storage.json'), JSON.stringify(data), 'utf8', () => { });
   }
 
-  return JSON.parse(JSON.stringify({ mailing: config!.mailing, monitor: config!.monitor, cqserver: config!.cqserver }));
+  return JSON.parse(JSON.stringify({ mailing: config!.mailing, monitor: config!.monitor, wework: config!.wework }));
 }
 
 async function Sign(realname: string, params: UserCookieType & { tuid: string; }, config: any, activity: Activity) {
@@ -196,25 +192,6 @@ async function Sign(realname: string, params: UserCookieType & { tuid: string; }
   return result;
 }
 
-async function handleMsg(this: CQ, data: string) {
-  // 处理图片，是否二维码，发送一些其他反馈
-  if (CQ.hasImage(data) && this.getCache('params') !== undefined) {
-    console.log('[图片]尝试二维码识别');
-    const img_url = data.match(/https:\/\/[\S]+[^\]]/g)![0];
-    const params = this.getCache('params');
-    const qr_str = (await QrCodeScan(img_url, 'url')).CodeResults?.[0].Url;
-
-    if (typeof qr_str === 'undefined') this.send('是否已配置腾讯云OCR？图像是否包含清晰二维码？', this.getTargetID());
-    else {
-      params.enc = qr_str.match(/(?<=&enc=)[\dA-Z]+/)?.[0];
-      const result = await QRCodeSign(params);
-      this.send(`${result} - ${params.name}`, this.getTargetID());
-      // 签到成功则清理缓存
-      result === '[二维码]签到成功' ? this.clearCache() : this.send(result, this.getTargetID());
-    }
-  }
-}
-
 process.on('SIGINT', () => {
   process.exit(0);
 });
@@ -235,7 +212,7 @@ process.on('SIGINT', () => {
     params.fid = auth_config.credentials.fid;
     config.monitor = { ...auth_config.config.monitor };
     config.mailing = { ...auth_config.config.mailing };
-    config.cqserver = { ...auth_config.config.cqserver };
+    config.wework = auth_config.config.wework || (auth_config.config.cqserver ? { enabled: auth_config.config.cqserver.cq_enabled, webhook_url: auth_config.config.cqserver.ws_url } : {});
   } else {
     // 打印本地用户列表，并返回用户数量
     const userItem = (
@@ -263,21 +240,34 @@ process.on('SIGINT', () => {
     config = await configure(params.phone);
   }
 
-  // 获取IM参数
-  const IM_Params = await getIMParams(params as UserCookieType);
-  if (IM_Params === 'AuthFailed') {
-    if (process.send) process.send('authfail');
-    process.exit(0);
-  }
+  // 获取IM参数（带重试）
+  let IM_Params: IMParamsType | 'AuthFailed';
+  let imRetries = 0;
+  do {
+    IM_Params = await getIMParams(params as UserCookieType);
+    if (IM_Params === 'AuthFailed') {
+      imRetries++;
+      console.log(red(`[${new Date().toLocaleString()}] 获取IM参数失败，第 ${imRetries} 次重试（5分钟后）...`));
+      if (imRetries >= 144) { // 12小时仍失败则通知父进程
+        if (process.send) process.send('authfail');
+        imRetries = 0; // 重置计数继续重试
+      }
+      await delay(300); // 等5分钟再重试
+    }
+  } while (IM_Params === 'AuthFailed');
   params.tuid = IM_Params.myTuid;
   params.name = IM_Params.myName;
 
-  let cq: CQ;
-  // 建立连接，添加监听事件并绑定处理函数
-  if (config.cqserver?.cq_enabled) {
-    cq = new CQ(config.cqserver.ws_url, config.cqserver.target_type, config.cqserver.target_id);
-    cq.connect();
-    cq.onMessage(handleMsg);
+  let weworkBot: WeworkBot | null = null;
+  const WEB_URL = getJsonObject('env.json').web?.url || 'http://localhost:3000';
+  // 企业微信机器人：仅需 Webhook URL，无需长连接
+  if (config.wework?.enabled && config.wework?.webhook_url) {
+    weworkBot = new WeworkBot(config.wework.webhook_url, WEB_URL);
+    console.log(blue(`[企业微信] 已配置 Webhook，面板地址: ${WEB_URL}`));
+  } else if (config.cqserver?.cq_enabled && config.cqserver?.ws_url) {
+    // 兼容旧版 QQ 机器人配置
+    weworkBot = new WeworkBot(config.cqserver.ws_url, WEB_URL);
+    console.log(blue('[企业微信] 兼容旧版配置'));
   }
 
   conn.open({
@@ -287,13 +277,22 @@ process.on('SIGINT', () => {
     appKey: WebIMConfig.appkey,
   });
 
+  let reconnectAttempts = 0;
+
   conn.listen({
     onOpened: () => {
+      reconnectAttempts = 0;
+      console.log(blue(`[${new Date().toLocaleString()}] 监听已连接`));
       if (process.send) process.send('success');
     },
     onClosed: () => {
-      console.log('[监听停止]');
-      process.exit(0);
+      reconnectAttempts++;
+      console.log(red(`[${new Date().toLocaleString()}] 连接断开，第 ${reconnectAttempts} 次重连（SDK自动重连中）...`));
+      // 24/7 运行：不断开，SDK 会自动重连
+      if (reconnectAttempts >= 9999) {
+        console.log(red('[致命] 重连次数过多，重启进程'));
+        process.exit(1);
+      }
     },
     onTextMessage: async (message: any) => {
       if (message?.ext?.attachment?.att_chat_course?.url.includes('sign')) {
@@ -304,11 +303,19 @@ process.on('SIGINT', () => {
         };
         const PPTActiveInfo = await getPPTActiveInfo({ activeId: IM_CourseInfo.aid, ...(params as UserCookieType) });
 
+        const signType = getSignType(PPTActiveInfo);
+        const now = new Date().toLocaleString('zh-CN');
+
         // 签到 & 推送消息
-        // 签到检测通知推送
-        if (config.cqserver?.cq_enabled) {
-          cq.send(`${IM_Params.myName}，检测到${getSignType(PPTActiveInfo)}，将在${config.monitor.delay}秒后处理`, config.cqserver.target_id);
-          cq.setCache('params', { ...params, activeId: IM_CourseInfo.aid });
+        // 企业微信：模板卡片（带签到按钮）
+        if (weworkBot) {
+          weworkBot.sendTemplateCard({
+            title: '📋 检测到签到活动',
+            user: IM_Params.myName,
+            signType,
+            time: now,
+            delay: config.monitor.delay,
+          });
         }
 
         await delay(config.monitor.delay);
@@ -320,6 +327,8 @@ process.on('SIGINT', () => {
           ifphoto: PPTActiveInfo.ifphoto,
           chatId: message?.to,
         });
+        const resultTime = new Date().toLocaleString('zh-CN');
+
         // 邮件推送签到结果
         if (config.mailing?.enabled) {
           sendEmail({
@@ -330,18 +339,27 @@ process.on('SIGINT', () => {
             mailing: config.mailing,
           });
         }
-        // CQ 推送签到结果
-        if (config.cqserver?.cq_enabled) {
-          cq.send(`${result} - ${IM_Params.myName}`, config.cqserver.target_id);
+        // 企业微信：签到结果推送（模板卡片 + 按钮）
+        if (weworkBot) {
+          const ok = result === 'success';
+          weworkBot.sendTemplateCard({
+            title: ok ? '✅ 签到成功' : '❌ 签到失败',
+            user: IM_Params.myName,
+            signType,
+            time: resultTime,
+            status: ok ? undefined : result,
+            statusOk: ok,
+          });
         }
 
       }
     },
     onError: (msg: string) => {
-      console.log(red('[发生异常]'), msg);
-      process.exit(0);
+      console.log(red(`[${new Date().toLocaleString()}] 发生异常: ${msg}`));
+      // 24/7 运行：只记录错误，不退出进程，SDK 会自动重连
     },
   });
 
-  console.log(blue(`[监听中] ${config.cqserver.cq_enabled ? 'CQ服务器已连接' : ''} ${config.mailing?.enabled ? '邮件推送已开启' : ''}...`));
+  const hasBot = weworkBot || config.wework?.enabled || config.cqserver?.cq_enabled;
+  console.log(blue(`[24/7 监听中] ${new Date().toLocaleString()} ${hasBot ? '| 企业微信已配置' : ''} ${config.mailing?.enabled ? '| 邮件已开启' : ''}`));
 })();
